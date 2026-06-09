@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+
+# Angular build outputs
+dist/
+tmp/
+out-tsc/
+bazel-out/
+.angular/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+*.lcov
+
+# IDE / Editor
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.history/
+.cache/
+
+# Claude Code
+.claude/
+CLAUDE.local.md
+.claude-*
+
