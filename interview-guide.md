@@ -55,12 +55,13 @@ service is most of a RAG system — but I built almost none of it.
 
 | Layer | What my code actually does |
 |---|---|
-| **Ingest trigger** | Upload PDF to GCS bucket; call `ImportDocuments` API (one shot) |
-| **Retriever wrapper** | `discovery_engine.py` constructs `SearchRequest`, calls the engine's `serving_config`, maps returned snippets into project's `RetrievedChunk` dataclass |
-| **Generation prompt** | `gemini.py` writes the system prompt (3-mode response framework — see §6 below), formats context blocks with `[n]` citation rules |
-| **Citation footer** | Auto-append "Access for free at openstax.org" (CC BY-NC-SA attribution) |
-| **API layer** | FastAPI + SSE streaming, CORS, book-filter parameter |
-| **Eval harness** | `run_eval.py` with keyword-overlap and citation-accuracy scoring |
+| **Corpus selection** | Picked OpenStax over Gutenberg/JLPT/NASA after a deliberate license + format audit (see §9, [learnings/03](./learnings/03-corpus-pivot-saga.md)) |
+| **GCP setup** | Created Vertex AI Search datastore + engine via Python SDK (REST API has 6+ documented traps — see [learnings/07](./learnings/07-vertex-ai-search-setup.md)); triggered `ImportDocuments` once for the 1,151-page PDF |
+| **Retriever wrapper** | `discovery_engine.py` — synchronous `SearchServiceClient` wrapped in `asyncio.to_thread` (the async client conflicts with FastAPI's worker threadpool); maps Standard-tier `derived_struct_data` snippets into project's `RetrievedChunk` dataclass with `page=1` placeholder |
+| **Generation prompt** | `gemini.py` — 3-mode response framework (Mode A/B/C, see §6), context blocks with `[n]` citation rules, license attribution requirement |
+| **API layer** | FastAPI + SSE streaming, CORS, `book_ids` filter parameter, `Retriever` interface (mock/discovery_engine/pgvector swappable via env var) |
+| **Eval scaffolding** | Hand-wrote 8-question golden set against PDF, locked 8 schema conventions (qid format / book_id format / PDF-page numbering / etc.); audited every entry — caught 9 bugs before any baseline run |
+| **Eval harness** | `run_eval.py` — HTTP to FastAPI, parses SSE stream, scores keyword overlap + citation accuracy, emits versioned markdown run cards committed to git |
 
 ### What Vertex AI Search built (large and opaque)
 
@@ -90,9 +91,10 @@ It would be dishonest to describe the managed internals as if I'd
 inspected them. The right framing for an interview is **"this is a
 black box, and here's what its outputs tell me about its behavior"**:
 
-- **Chunk size and overlap** — not exposed; I infer "document-level"
-  retrieval behavior from the fact that a single 1,151-page PDF
-  consistently returns one matching document per query
+- **Chunk size and overlap** — not exposed. The `search` API returns
+  document-level results (one match per import unit) regardless of
+  whether internal chunking happened — so I can observe the API
+  surface but not the underlying chunking strategy
 - **Embedding model identity** — not named in the docs; only that it's
   a Google-internal model
 - **ANN algorithm and parameters** (HNSW vs IVF, m, ef_construction) — not exposed
@@ -141,7 +143,9 @@ What Gemini **does NOT do** in Phase 1:
 - ❌ Chunk the PDF — Vertex AI Search's internal chunker
 - ❌ Compute embeddings — Vertex AI Search's internal model
 - ❌ Rerank candidates — Phase 1 has no reranker (Phase 2 adds one)
-- ❌ Look up page numbers — Standard tier doesn't expose them; nobody can
+- ❌ Look up page numbers — Standard tier doesn't expose them in the
+  search response; Enterprise tier's extractive segments do, but we
+  chose Standard for cost
 
 **In Phase 2 Gemini gains a second job: LLM reranker.** Two separate
 Gemini API calls per query — one scores 20 candidate chunks 0–10 (`top-20
@@ -215,7 +219,7 @@ GCS bucket
 ┌──────────────────────────────────────────┐
 │ Cloud SQL + pgvector                     │
 │  ├─ chunks.embedding (vector(768))       │ ← I can SELECT it
-│  ├─ pgvector HNSW index (m=16, ef=64)    │ ← I tune the params
+│  ├─ pgvector HNSW index (m, ef tunable)  │ ← I will tune against eval
 │  ├─ tsvector + GIN index (BM25)          │ ← I configure the analyzer
 │  └─ FK to books / chapters tables        │ ← I designed the schema
 └────────────────┬─────────────────────────┘
@@ -302,7 +306,7 @@ Phase 1 baseline run (8-question golden set):
 |---|---|---|
 | Avg keyword overlap | 19.8% | **18.5%** (after prompt tuning) |
 | Citation accuracy | 0.00% | **0.00%** |
-| Latency p50 | 1.7s | 3.0s |
+| Latency p50 | 1.7s | 3.5s |
 | Cost (full deploy + first run) | $0 | **< $5 USD** |
 
 Three observations to anchor the interview narrative:
@@ -324,9 +328,11 @@ design choice** (chunk-level retrieval; hybrid BM25 for cross-topic;
 Document AI + Gemini Vision for figures).
 
 ### Observation 3 — A 90% baseline would have been a red flag
-If a managed search product hit 90% citation accuracy on this eval, my
-first suspicion would be that the eval is leaking ground truth somehow.
-Realistic numbers for this corpus + this tier are 0–25%. **Calibration on
+If a managed search product hit 90% *citation accuracy* on this eval, my
+first suspicion would be that the eval is leaking ground truth somehow —
+because the citation metric depends on `expected_page_range` matching the
+returned page, and Standard tier doesn't return page numbers at all.
+Hitting that metric would be structurally impossible. **Calibration on
 unrealistic baselines is a stronger signal than chasing them.**
 
 > **In interviews:** *"My Phase 1 keyword score was 18%. That sounds bad
@@ -356,10 +362,22 @@ MODE B — Partial answer    (context covers part; name what's missing)
 MODE C — Not found         (context not relevant; describe what was retrieved)
 ```
 
-Result: keyword score went from 11% to 18.5% (+65%). Two dead buckets
-(`chapter_scoped`, `cross_topic`) came back to life from 0% → 16.7%.
-**`figure_or_diagram` and `citation_accuracy` stayed at 0%** — confirming
-those are retrieval limits, not prompt limits.
+Result: average keyword score on the same 8 questions, same retrieval
+backend, same model — only the system prompt changed:
+
+| | Before (binary refuse-or-answer) | After (3-mode framework) |
+|---|---|---|
+| Avg keyword overlap | 11.25% | **18.54%** (+65%) |
+| `chapter_scoped` bucket | 0.00% | 16.67% |
+| `cross_topic` bucket | 0.00% | 16.67% |
+| `figure_or_diagram` bucket | 0.00% | 0.00% (unchanged) |
+| Citation accuracy | 0.00% | 0.00% (unchanged) |
+
+The 18.5% is the number reported as the Phase 1 baseline in §5 — it's
+post-prompt-tuning. The two dead buckets came back to life because the
+retrieval was returning *partial* info that Mode-B partial-answer can use.
+**`figure_or_diagram` and citation accuracy stayed at 0%** — confirming
+those are retrieval-layer limits, not prompt-layer limits.
 
 > **In interviews:** *"Knowing which knob fixes which problem is what makes
 > this useful instead of a guess-and-check session. Prompt tuning got me
@@ -407,7 +425,7 @@ noise appendix](./learnings/07-vertex-ai-search-setup.md)
 |---|---|
 | Document-level retrieval, no chunks | Per-chunk indexing in Cloud SQL `chunks` table |
 | 0% citation accuracy (no page metadata) | Document AI Layout Parser → per-chunk `(page, bbox)` |
-| Single-chapter bias (chapter_scoped 0%) | Top-k retrieval surfaces multiple chunks; hybrid retrieval crosses sections |
+| Multi-section synthesis fails (chapter_scoped 0%) — search returns 1 doc, can't combine sections | Top-k retrieval surfaces N chunks (default 5); LLM reranker keeps the best multi-section coverage |
 | Cross-topic queries fail (0%) | RRF fusion of vector + BM25; LLM reranker |
 | Figure questions fail (0%) | Gemini Vision generates captions for diagrams; embedded as text |
 | Structural noise (Key Terms outranks body) | Filter Document AI blocks by `layoutType`; skip `list-item` / `caption` from main index |
@@ -426,10 +444,12 @@ The full Phase 2 design with schema, SQL, and tradeoffs:
 A real signal of project judgment is what's missing on purpose. Examples:
 
 - **Phase 1 was not deployed to Cloud Run.** I designed the deployment
-  (`infra/setup.md`), but for a Phase 1 baseline that already produces the
-  same numbers locally, paying ~$5/month for visible cold starts adds zero
-  to the project narrative. Phase 2 will deploy because Cloud SQL needs to
-  run continuously.
+  (`infra/setup.md`), but the local FastAPI calls the same Vertex AI
+  Search datastore the cloud deployment would — retrieval scores would
+  be identical, only latency profile (cold starts + LB) would change.
+  Paying for that cold-start latency to get demo URLs added zero to the
+  project narrative. Phase 2 will deploy because Cloud SQL needs to run
+  continuously.
 - **The corpus pivoted from history books to OpenStax astronomy.** Original
   design assumed Project Gutenberg PDFs. They turned out to only exist as
   scans (no text layer) or in copyright-protected modern editions. OpenStax
@@ -438,9 +458,13 @@ A real signal of project judgment is what's missing on purpose. Examples:
   attribution string is auto-appended to every answer.
 - **Eval set is hand-written, not LLM-synthesized.** 8 questions verified
   against PDF. Caught 9 audit bugs in the first pass — including a schema
-  bug (`expected_book` couldn't represent cross-topic) that would have
-  silently broken the eval if not caught at audit. The full audit log
-  shows what audit actually catches.
+  bug where `expected_book` was a single string and couldn't represent
+  cross-topic questions that span two parts of the textbook. Without the
+  audit, cross-topic ground truth would have silently been incomplete
+  (one of the two source books would always be missing from the eval),
+  which would have understated Phase 1's `cross_topic` failure mode and
+  weakened the Phase 2 narrative. The full audit log shows what audit
+  actually catches.
 - **Embedding model not upgraded for Phase 2 (yet).** Stayed on
   `text-embedding-005` instead of upgrading to Gemini Embedding 2.
   Reasoning: Phase 2's value proposition is "self-built vs managed
@@ -484,7 +508,7 @@ links to its full writeup in `learnings/`.
 | Retrieval (P1) | Vertex AI Search Standard tier |
 | Retrieval (P2) | Cloud SQL + pgvector HNSW, BM25 (tsvector), RRF, LLM reranker |
 | Compute | Cloud Run (scale-to-zero) — designed but not yet deployed |
-| Events | Eventarc on GCS finalize → worker (Phase 2) |
+| Events | Eventarc on GCS finalize → ingestion worker (Phase 2 only — Phase 1 used a one-shot manual `ImportDocuments` call) |
 | Observability | Cloud Logging (structured JSON), Cloud Monitoring dashboards |
 | IaC | Hand-authored `gcloud` runbook (`infra/setup.md`), not Terraform |
 | Eval | Hand-written golden set + Python harness; markdown run cards committed to git |
