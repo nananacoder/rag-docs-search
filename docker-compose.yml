@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: dev
+      LOG_LEVEL: INFO
+      RETRIEVAL_BACKEND: mock
+      CORS_ORIGINS: "http://localhost:4200,http://localhost:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    # Note: in production the LB does path-based routing `/api/*` → api.
+    # For compose we hit the api directly via the browser at http://localhost:8000
+    # (Angular build uses environment.prod which expects same-origin /api).
+    # For live dev with HMR, instead run `npm start` locally; compose is for a
+    # prod-like sanity check.
