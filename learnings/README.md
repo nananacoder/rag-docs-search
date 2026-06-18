@@ -27,7 +27,8 @@ in an interview.
 - [08 — Phase 1 baseline: when "bad" numbers are the point](./08-phase1-baseline-interpretation.md)
 
 ### Retrieval / Architecture
-- _(coming — Phase 1 vs Phase 2 design tradeoffs, chunking strategy, hybrid retrieval rationale, etc.)_
+- [09 — Vector DB landscape: why pgvector for this project (and what I got wrong)](./09-vector-db-landscape.md)
+- _(coming — chunking strategy, hybrid retrieval rationale, etc.)_
 
 ### LLM / Generation
 - _(coming — prompt design, citation grounding, router/escalation, model selection)_
