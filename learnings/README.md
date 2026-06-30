@@ -28,6 +28,7 @@ in an interview.
 
 ### Retrieval / Architecture
 - [09 — Vector DB landscape: why pgvector for this project (and what I got wrong)](./09-vector-db-landscape.md)
+- [10 — Phase 2 design audit against 2026 RAG best practices](./10-phase2-design-audit-2026.md)
 - _(coming — chunking strategy, hybrid retrieval rationale, etc.)_
 
 ### LLM / Generation
