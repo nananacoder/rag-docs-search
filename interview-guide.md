@@ -507,6 +507,8 @@ links to its full writeup in `learnings/`.
 | Generation | Gemini 2.5 Flash via google-genai (Vertex mode) |
 | Retrieval (P1) | Vertex AI Search Standard tier |
 | Retrieval (P2) | Cloud SQL + pgvector HNSW, BM25 (tsvector), RRF, LLM reranker |
+| P2 DB access | `google-cloud-sql-connector` + `asyncpg` + `pgvector.asyncpg` — **no ORM**; Pydantic doubles as API + DB row model, wrapped in Repository classes |
+| P2 schema management | Hand-written `schema.sql` committed to git; applied via GCP-documented Cloud SQL Studio workflow (Alembic/Flyway deferred as ADR) |
 | Compute | Cloud Run (scale-to-zero) — designed but not yet deployed |
 | Events | Eventarc on GCS finalize → ingestion worker (Phase 2 only — Phase 1 used a one-shot manual `ImportDocuments` call) |
 | Observability | Cloud Logging (structured JSON), Cloud Monitoring dashboards |
