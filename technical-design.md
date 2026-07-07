@@ -99,7 +99,7 @@ Designed as a **Shared VPC** topology — the PCA-canonical enterprise pattern. 
 - **Phase 1:** Vertex AI Search (Agent Builder) handles parsing, chunking, embedding, indexing, retrieval.
 - **Phase 2:**
   - **Document AI Layout Parser** for structure-aware PDF parsing (returns blocks with bounding boxes).
-  - **`text-embedding-005`** (768-dim) via Vertex AI Embedding API for text chunks.
+  - **Gemini Embedding 2** (`output_dimensionality=768`, MRL-truncated from native 3072) via Vertex AI Embedding API for text chunks.
   - **Gemini 2.5 Flash Vision** to generate captions for image/diagram chunks; captions embedded alongside text.
   - **pgvector** with HNSW index for ANN search.
   - **Hybrid retrieval**: BM25 (Postgres `tsvector`) + vector ANN, fused via **Reciprocal Rank Fusion (RRF)**.
@@ -153,7 +153,7 @@ Idempotency keyed by `(gcs_object, generation)`; re-upload triggers upsert, not 
 | PDF parsing | Vertex AI Search built-in | Document AI Layout Parser + `pymupdf` fallback | Layout-aware parsing; bbox-based citation; detect chapter headings |
 | Chunking | Auto | Recursive + semantic + **chapter/section-aware**, with overlap | Chunk boundaries respect textbook structure; size/overlap trade-offs |
 | Metadata | Auto | Explicit: `book_id` (textbook part), `authors`, `chapter`, `section`, `page` | Metadata-filtered retrieval (part scoping) |
-| Embedding | Managed | `text-embedding-005` API, batched | Batching, retries, dim choice |
+| Embedding | Managed | Gemini Embedding 2 API, batched | Batching, retries, dim choice |
 | Vector store | Black box | **Cloud SQL + pgvector** (HNSW) | ANN indexes, metadata filters, vector + SQL joins |
 | Retrieval | Vector only | **Hybrid (BM25 + vector) + RRF** | Sparse vs dense; proper-noun recall (names/places/dates) |
 | Multimodal | Layout-aware | Gemini Vision → figure/diagram caption → embed caption | Multimodal embedding vs description-based |
@@ -178,7 +178,7 @@ By keeping generation and evaluation identical and varying only the retrieval st
 | Component | Technology | Rationale |
 |---|---|---|
 | Generation | Gemini 2.5 Flash (default), 2.5 Pro (escalated) | Flash covers 90%+ of RAG-shaped queries at ~1/10 cost of Pro. |
-| Embedding | `text-embedding-005` (768-dim) | Latest Vertex embedding model; 768 dims balances quality vs storage. Handles modern technical English (textbook prose with scientific terminology) — verified on eval set. |
+| Embedding | Gemini Embedding 2 (768-dim via MRL truncation) | 2026 GCP-default Gemini-family embedding model (adopted after the learnings/10 audit, replacing `text-embedding-005`). Pinned to 768 dims: stays under pgvector's 2000-dim HNSW index cap (native 3072 would require `halfvec`) and keeps the storage/index design unchanged. |
 | Vector store (Phase 2) | Cloud SQL + pgvector | Cheapest production-viable option; allows JOINs with part/chapter metadata for scoped queries; same `psycopg` workflow engineers already know. |
 | Parsing (Phase 2) | Document AI Layout Parser | Returns blocks with bounding boxes → enables precise citation highlighting and chapter-heading detection. |
 | Orchestration | FastAPI + direct SDK calls | Explicit control over prompt assembly and citation logic; no framework magic to debug in interviews. |

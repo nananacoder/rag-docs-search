@@ -30,7 +30,7 @@ differences attribute to the retrieval stack.
 |---|---|---|
 | **Retrieval backend** | Vertex AI Search (Discovery Engine), Standard tier | Cloud SQL + pgvector (HNSW) |
 | **Chunking** | Google-internal, opaque | Hand-written, chapter-aware (`chunk_size=800, overlap=120`) |
-| **Embedding** | Google internal model, opaque | `text-embedding-005`, 768-dim, batched + cached |
+| **Embedding** | Google internal model, opaque | Gemini Embedding 2, 768-dim (MRL truncation), batched + cached |
 | **Keyword index** | Internal | Postgres `tsvector` + GIN (BM25) |
 | **Retrieval logic** | Single `search` API call | Hybrid: vector + BM25 + RRF fusion + LLM reranker |
 | **Multimodal** | Text-only retrieval (figures not exposed in results) | Document AI Layout Parser → Gemini Vision captions for figures/diagrams |
@@ -210,7 +210,7 @@ GCS bucket
 │ My ingestion pipeline:                   │
 │  ├─ Document AI Layout Parser            │ ← I call it, results visible
 │  ├─ my chunking code (chunk_size=800)    │ ← I write the splitter
-│  ├─ text-embedding-005 API               │ ← I choose the model
+│  ├─ Gemini Embedding 2 API               │ ← I choose the model
 │  ├─ Gemini Vision (figure captions)      │ ← I write the prompt
 │  └─ INSERT INTO chunks (Cloud SQL)       │ ← I own the schema
 └────────────────┬─────────────────────────┘
@@ -465,12 +465,16 @@ A real signal of project judgment is what's missing on purpose. Examples:
   which would have understated Phase 1's `cross_topic` failure mode and
   weakened the Phase 2 narrative. The full audit log shows what audit
   actually catches.
-- **Embedding model not upgraded for Phase 2 (yet).** Stayed on
-  `text-embedding-005` instead of upgrading to Gemini Embedding 2.
-  Reasoning: Phase 2's value proposition is "self-built vs managed
-  retrieval," not "newer embedding model." Switching the model would
-  confound the A/B comparison. A future Phase 3 could test the embedding
-  upgrade as a separately controlled variable.
+- **Embedding upgraded to Gemini Embedding 2 — but dimension pinned at
+  768.** The original design kept `text-embedding-005` as a "controlled
+  variable" vs Phase 1. The 2026 design audit
+  ([learnings/10](./learnings/10-phase2-design-audit-2026.md)) overturned
+  that: Phase 1's embedding model was never observable, so the control
+  claim was illusory. Phase 2 uses Gemini Embedding 2 with
+  `output_dimensionality=768` (MRL truncation from native 3072) — chosen
+  deliberately over 3072 because pgvector's HNSW index caps at 2000 dims,
+  and because holding the dimension at 768 keeps the storage/index design
+  unchanged. What I deliberately did NOT do: chase the largest dimension.
 
 > **In interviews:** *"Knowing which battles to fight matters as much as
 > winning them. I deliberately stopped at Phase 1 baseline before

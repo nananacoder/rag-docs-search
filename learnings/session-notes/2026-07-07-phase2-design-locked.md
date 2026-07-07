@@ -175,6 +175,23 @@ implementing Phase 2, here's the ordered task list:
 
 **Then M2 is done and M3 (ingestion pipeline) can start.**
 
+> **Addendum (2026-07-07, pre-M2 design re-audit).** Four refinements were
+> folded into the design docs before starting task 1:
+> 1. **Embedding dimension resolved**: Gemini Embedding 2 at
+>    `output_dimensionality=768` (native 3072 exceeds pgvector's 2000-dim
+>    HNSW cap). `vector(768)` stands. L2-normalize before insert; task 7
+>    additionally verifies the norm of one real API vector.
+> 2. **Task 2 schema updated** (`phase2-selfbuilt.md §3`): `content_tsv` is
+>    now a `GENERATED ALWAYS … STORED` column (was unpopulated — silent
+>    BM25-empty bug), and a nullable `context_prefix` column lands now so
+>    M3's Contextual Retrieval needs no ALTER. Embedding + tsv cover
+>    `context_prefix || content`; citations display bare `content`.
+> 3. **Task 4 scope**: `connection.py` is dual-mode
+>    (`DB_MODE=cloudsql|direct`) so the CI test can run against docker
+>    `pgvector/pgvector:pg16` — see §2.5.
+> 4. **Task 1 extra check**: confirm pgvector ≥ 0.8 on the instance
+>    (iterative index scans for the filtered-HNSW post-filter case, §5.1).
+
 ---
 
 ## Files organizational context

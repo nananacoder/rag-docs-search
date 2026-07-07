@@ -15,11 +15,11 @@ See [technical-design.md §5](./technical-design.md) for the component compariso
 | PDF parsing | Vertex AI Search built-in | **Document AI Layout Parser** (+ chapter heading detection) |
 | Chunking | Auto | **Hand-written: chapter/section-aware recursive splitter** |
 | Metadata | Basic structData | **Rich: book / author / chapter / section / page / modality** |
-| Embedding | Managed | **`text-embedding-005` API**, batched, cached |
+| Embedding | Managed | **Gemini Embedding 2** (`output_dimensionality=768`), batched, cached |
 | Vector store | Vertex AI Search datastore | **Cloud SQL + pgvector** (HNSW) |
 | Retrieval | Vector only | **Hybrid (BM25 + vector) with RRF** |
 | Reranking | None | **Gemini 2.5 Flash as LLM reranker** |
-| Multimodal | Layout-aware | **Gemini 2.5 Flash Vision → caption figures/maps → embed** |
+| Multimodal | Layout-aware | **Gemini 2.5 Flash Vision → caption figures/diagrams → embed** |
 | Router | Static (Flash only) | **Deterministic router with 3 escalation rules** |
 | Citation UX | Page jump | **Page jump + bbox highlight** |
 
@@ -238,6 +238,19 @@ Notes:
 - For Cloud Run, also pass `Connector(refresh_strategy="lazy")` per GCP's
   June 2026 serverless guidance.
 
+**Dual-mode for CI / local dev**: the connector path above requires GCP
+credentials, which CI and local docker Postgres don't have. `connection.py`
+therefore switches on an env var:
+
+```
+DB_MODE=cloudsql   # Cloud SQL connector + IAM auth (default; Cloud Run + dev-against-cloud)
+DB_MODE=direct     # plain asyncpg.create_pool(dsn=DATABASE_URL) — CI / docker Postgres
+```
+
+Both modes pass `init=register_vector` so the `vector` type works
+identically. The unit test in M2 runs against `DB_MODE=direct` + a
+`pgvector/pgvector:pg16` container.
+
 ### Repository pattern — example
 
 ```python
@@ -305,7 +318,7 @@ CREATE TABLE books (
   year          INT,
   gcs_uri       TEXT NOT NULL,
   page_count    INT,
-  source        TEXT,                     -- e.g. 'project_gutenberg'
+  source        TEXT,                     -- e.g. 'openstax'
   ingested_at   TIMESTAMPTZ DEFAULT now(),
   content_hash  TEXT
 );
@@ -315,7 +328,7 @@ CREATE TABLE chapters (
   chapter_id    BIGSERIAL PRIMARY KEY,
   book_id       TEXT REFERENCES books(book_id) ON DELETE CASCADE,
   ordinal       INT,                      -- chapter 1,2,3...
-  title         TEXT,                     -- "Chapter XXXVIII: General Observations on the Fall..."
+  title         TEXT,                     -- "Chapter 22: Stars from Adolescence to Old Age"
   start_page    INT,
   end_page      INT,
   UNIQUE (book_id, ordinal)
@@ -328,10 +341,12 @@ CREATE TABLE chunks (
   chapter_id    BIGINT REFERENCES chapters(chapter_id),
   page          INT,
   bbox          JSONB,                    -- {x0,y0,x1,y1} from Document AI
-  modality      TEXT CHECK (modality IN ('text','table','figure','map')),
-  content       TEXT NOT NULL,            -- text, table markdown, or figure/map caption
-  content_tsv   tsvector,                 -- for BM25
-  embedding     vector(768),              -- text-embedding-005
+  modality      TEXT CHECK (modality IN ('text','table','figure','diagram')),
+  content       TEXT NOT NULL,            -- VERBATIM text / table markdown / caption — what citations display
+  context_prefix TEXT,                    -- M3 Contextual Retrieval: LLM-generated situating context (NULL until M3)
+  content_tsv   tsvector GENERATED ALWAYS AS
+                  (to_tsvector('english', coalesce(context_prefix, '') || ' ' || content)) STORED,
+  embedding     vector(768),              -- Gemini Embedding 2, output_dimensionality=768 (MRL)
   token_count   INT,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
@@ -348,8 +363,20 @@ CREATE INDEX chunks_book_page ON chunks (book_id, page);
 
 **Why this schema:**
 - `books` / `chapters` / `chunks` three-table split mirrors how humans think about a textbook — and makes "scope query to *Astronomy 2e* Part III (Stars), Chapter 22" a single `WHERE book_id = ... AND chapter_id = ...` filter.
-- `modality` distinguishes narrative text from maps/figures, which matters for the router's Pro-escalation rule.
+- `modality` distinguishes narrative text from figures/diagrams, which matters for the router's Pro-escalation rule.
 - `bbox` on every chunk enables precise citation highlighting downstream.
+- **`content` vs `context_prefix` split** (Contextual Retrieval, M3): `content`
+  is always the verbatim source text — it's what the citation panel and bbox
+  highlight show the user. `context_prefix` holds the LLM-generated 50–100
+  token situating context. Retrieval sees the concatenation (embedding is
+  computed over `context_prefix || ' ' || content`; the generated `content_tsv`
+  column indexes the same concatenation → contextual BM25 for free). Display
+  sees only `content`. The column is nullable so M2 can insert bare chunks
+  before the M3 contextualizer exists.
+- **`content_tsv` is a `GENERATED ALWAYS … STORED` column**, not an
+  application-populated one. This removes an entire drift class: ingestion
+  code can never forget to (re)compute the tsvector, and the BM25 side of
+  §5.1 can never silently go empty.
 
 **Why HNSW over IVF:** better recall at low-to-moderate dataset size (our target: <50k chunks for the 1,151-page *Astronomy 2e* split into 4 parts), no training step, online insert-friendly. IVF revisited above ~1M chunks.
 
@@ -375,7 +402,7 @@ Three strategies, selected by block type:
 - **Figure/diagram blocks**: one chunk per figure, content = Gemini-generated caption (§4.3), `modality='figure'` or `'diagram'` (heuristic: caption keywords `diagram`, `plot`, `chart`, `spectrum`, `H-R diagram`, or photograph-like aspect ratio).
 - **Never split across chapter boundaries** — this is the key textbook-specific rule. A chunk belongs to exactly one chapter (and ideally one section).
 
-### 4.3 Figure/map captioning (multimodal)
+### 4.3 Figure/diagram captioning (multimodal)
 - For each image block, call Gemini 2.5 Flash Vision with prompt:
   *"This is a figure from an introductory astronomy textbook. Describe it in detail, including any axis labels, scientific quantities shown, celestial objects depicted, and explanatory annotations. If it is a diagram (e.g. H-R diagram, electromagnetic spectrum, galaxy classification chart), describe the structure and what each axis or region represents. Output only the description."*
 - Cache captions keyed by `sha256(image_bytes)` in GCS — critical for large illustrated volumes.
@@ -384,9 +411,23 @@ Three strategies, selected by block type:
 **Alternative considered:** multimodal embedding model (`multimodalembedding@001`). Rejected because: (a) captions-as-text give one unified BM25 + vector path, (b) captions are human-readable in the UI citation, (c) cheaper at current volumes. **Deliberate trade-off, recorded as an ADR.**
 
 ### 4.4 Embedding
-- Model: `text-embedding-005` (768-dim).
+- Model: **Gemini Embedding 2** (2026 GCP default; adopted over
+  `text-embedding-005` per [learnings/10 audit](./learnings/10-phase2-design-audit-2026.md)).
+- **Dimension: 768 via `output_dimensionality=768`** (MRL truncation from the
+  native 3072; recommended truncation points are 768/1536/3072). Why not
+  3072: pgvector's HNSW index caps at **2000 dims** for the `vector` type —
+  native 3072 would force `halfvec`. 768 keeps `vector(768)`, i.e. the same
+  storage/index footprint the design was originally sized for.
+- **L2-normalize each vector before insert.** Sources disagree on whether
+  truncated outputs come pre-normalized; normalizing is idempotent either
+  way and guarantees cosine ≡ inner-product behavior. M2 exit check:
+  print the norm of one real API vector.
 - **Batch size 250** (API limit); retry with exponential backoff on 429/503.
-- **Cache** keyed by `sha256(chunk_content + model_version)` → vector, stored in a GCS JSON (cheap, sufficient for personal project). Skip API call on cache hit — essential when re-running ingestion on config changes.
+- **Embed the contextualized text**: once M3's Contextual Retrieval lands, the
+  string sent to the embedding API is `context_prefix || ' ' || content` — the
+  same concatenation the generated `content_tsv` column indexes. Pre-M3 chunks
+  embed bare `content` (prefix is NULL).
+- **Cache** keyed by `sha256(text_sent_to_api + model_version)` → vector, stored in a GCS JSON (cheap, sufficient for personal project). Skip API call on cache hit — essential when re-running ingestion on config changes. Note the key is over the *contextualized* text, not bare `content` — a regenerated `context_prefix` must miss the cache.
 - Track token usage per batch for cost dashboard.
 
 ### 4.5 Upsert
@@ -439,6 +480,12 @@ LIMIT 20;
 ```
 
 **Why RRF over weighted sum:** scale-free — no need to calibrate BM25 and cosine-similarity scores to the same range, which is fragile. `k=60` is the standard.
+
+**Filtered HNSW caveat:** the `vec` CTE applies `WHERE book_id IN (…)` on top of
+an HNSW scan — a post-filter. With a highly selective filter, HNSW can return
+fewer than the requested 40 rows. pgvector ≥ 0.8's **iterative index scans**
+fix this; M2 task: confirm the Cloud SQL PG16 instance ships pgvector ≥ 0.8.
+(Low practical risk here — one book split into 4 parts is a weak filter.)
 
 **Why hybrid matters for an astronomy textbook:** proper nouns and technical terms (Chandrasekhar, Carrington Event, Cepheid variable, Lagrange point, Schwarzschild radius, Andromeda) are where pure vector search is weakest — name-dropping queries hit BM25 exactly. This is directly testable with the eval set and a natural Phase 2 win.
 
@@ -526,7 +573,7 @@ Break out context recall by `query_type` (factual / chapter_scoped / cross_topic
 Pick 5 representative queries from the golden set, show both systems' answers side-by-side, annotate *why* one is better. Must include at least one:
 - Proper-noun-heavy query (BM25 win).
 - Chapter-scoped query (chunking win).
-- Figure/map query (multimodal pipeline win).
+- Figure/diagram query (multimodal pipeline win).
 
 ### 9.3 Hypotheses Revisited
 Explicitly revisit H1–H4 from [technical-design.md §5.2](./technical-design.md). Mark each **confirmed / refuted / inconclusive** with data.
@@ -565,6 +612,7 @@ Honesty here is itself a strong interview signal.
 ## 11. What to Watch For (Pitfalls)
 
 - **pgvector HNSW + `ef_search`**: too low = bad recall, too high = slow. Tune against the eval set, not by guessing. Record the recall curve.
+- **HNSW index build memory on `db-f1-micro`**: 0.6 GB shared-core is tight for `maintenance_work_mem` during index build. At ~5–10k chunks × 768-dim it should pass (slowly); if the build OOMs, temporarily bump the instance to `db-g1-small` for the ingest run, then scale back down — no schema change needed.
 - **Connection pooling**: Cloud Run + Cloud SQL can exhaust connections fast. We use **`google-cloud-sql-connector` v1.20.4 + `asyncpg.create_pool`** (per §2.5) — the connector handles IAM-authenticated TLS while asyncpg's built-in pool bounds connections. Starting parameters: `min_size=2, max_size=10`; tune based on Cloud Run `--concurrency` and observed `pg_stat_activity` saturation.
 - **Embedding API rate limits**: batch sizing and backoff matter. Log 429s as a first-class metric.
 - **Document AI quotas**: Layout Parser has monthly free quota; the initial 1,151-page *Astronomy 2e* ingest (split into 4 parts) will use a large slice — plan for it, and avoid full re-ingestion casually.

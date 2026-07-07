@@ -35,6 +35,13 @@ what's marketing.
 
 Plus: 2 things to ADD that aren't in the current design.
 
+> **Post-audit update (2026-07-07).** Row 10 audited the then-current
+> SQLAlchemy-based design. Commit `ebc66bb` (after this audit) replaced
+> SQLAlchemy with **Pydantic + Repository** (raw SQL via asyncpg, no ORM)
+> — see `phase2-selfbuilt.md §2.5`. The "raw SQL for hybrid retrieval"
+> half of the verdict carries over unchanged. Row 3's open dimension
+> question is resolved in the Adoption 2 section below.
+
 ---
 
 ## The 4 adoptions (most important changes)
@@ -100,6 +107,16 @@ embedding identity was never knowable."
 **Caveat.** I couldn't fetch the exact dimensions of Gemini Embedding 2
 from the navigation-only page returned. **M2 task: confirm dimensions
 and adjust schema `vector(N)` accordingly** before the first INSERT.
+
+> **Resolved (2026-07-07).** Gemini Embedding 2 outputs **3072-dim by
+> default**, with MRL truncation via `output_dimensionality`
+> (recommended points: 768/1536/3072, max input 8,192 tokens). Decision:
+> **768**. Rationale: pgvector's HNSW index caps at **2000 dims** for
+> the `vector` type, so native 3072 would force `halfvec`; 768 keeps
+> `vector(768)` and the original storage/index sizing. Sources disagree
+> on whether truncated outputs come pre-normalized — the pipeline
+> L2-normalizes before insert regardless (idempotent). Recorded in
+> `phase2-selfbuilt.md §4.4`.
 
 **Source**: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings
 
