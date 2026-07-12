@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     discovery_engine_collection: str = "default_collection"
     discovery_engine_location: Literal["us", "eu", "global"] = "us"
 
+    # Phase 2 — Cloud SQL + pgvector (phase2-selfbuilt.md §2.5)
+    # "cloudsql": cloud-sql-python-connector + IAM auth (Cloud Run, dev-against-cloud)
+    # "direct":   plain asyncpg DSN (CI / local docker Postgres)
+    db_mode: Literal["cloudsql", "direct"] = "cloudsql"
+    db_instance: str = "rag-pg"
+    db_name: str = "rag"
+    db_iam_user: str | None = None
+    database_url: str | None = None  # direct mode only
+    db_pool_min_size: int = Field(default=2, ge=0)
+    db_pool_max_size: int = Field(default=10, ge=1)
+
     gemini_model: str = "gemini-2.5-flash"
     gemini_fallback_model: str = "gemini-2.5-pro"
     generation_temperature: float = 0.2
@@ -44,6 +55,13 @@ class Settings(BaseSettings):
     @property
     def is_gcp_backend(self) -> bool:
         return self.retrieval_backend != "mock"
+
+    @property
+    def db_instance_connection_name(self) -> str:
+        """PROJECT:REGION:INSTANCE, the Cloud SQL connector's addressing format."""
+        if not self.gcp_project_id:
+            raise ValueError("GCP_PROJECT_ID is required when DB_MODE=cloudsql")
+        return f"{self.gcp_project_id}:{self.gcp_location}:{self.db_instance}"
 
 
 @lru_cache
