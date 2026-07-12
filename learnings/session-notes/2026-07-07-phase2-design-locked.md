@@ -192,6 +192,17 @@ implementing Phase 2, here's the ordered task list:
 > 4. **Task 1 extra check**: confirm pgvector ≥ 0.8 on the instance
 >    (iterative index scans for the filtered-HNSW post-filter case, §5.1).
 
+> **M2 COMPLETE (2026-07-12).** All 7 tasks done. Code: commit `e2ae070`
+> (db layer + round-trip test, verified on docker pgvector:pg16 AND on
+> the real instance via IAM auth). Infra: `rag-pg` provisioned
+> (db-f1-micro, PG16, us-central1, pgvector **0.8.1**, IAM auth on),
+> schema applied, IAM user `ankiyang1201@gmail.com` granted; runbook in
+> `infra/setup-phase2.md`. Instance left **STOPPED** — start/stop per
+> dev session via `infra/scripts/sql-start.sh` / `sql-stop.sh`
+> (storage-only ~$1-2/mo while stopped). Next: M3 ingestion pipeline
+> (Document AI → chunking → Contextual Retrieval → Gemini Embedding 2
+> @768 → upsert).
+
 ---
 
 ## Files organizational context
