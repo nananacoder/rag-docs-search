@@ -97,6 +97,27 @@ class ChunkRepository:
             )
             return ChunkRow.model_validate(dict(row)) if row else None
 
+    async def insert_many(
+        self,
+        chunks: list[ChunkRow],
+        conn: "asyncpg.Connection | asyncpg.pool.PoolConnectionProxy",
+    ) -> int:
+        """Bulk insert on a caller-provided connection so ingestion can wrap
+        delete_by_book + insert_many in ONE transaction (§4.5: the book is
+        the transaction boundary)."""
+        await conn.executemany(
+            """INSERT INTO chunks
+                   (book_id, chapter_id, page, bbox, modality,
+                    content, context_prefix, embedding, token_count)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
+            [
+                (c.book_id, c.chapter_id, c.page, c.bbox, c.modality,
+                 c.content, c.context_prefix, c.embedding, c.token_count)
+                for c in chunks
+            ],
+        )
+        return len(chunks)
+
     async def delete_by_book(self, book_id: str) -> int:
         """Idempotent re-ingest support (§4.5): book is the transaction boundary."""
         async with self.pool.acquire() as conn:

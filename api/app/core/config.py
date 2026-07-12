@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     db_pool_min_size: int = Field(default=2, ge=0)
     db_pool_max_size: int = Field(default=10, ge=1)
 
+    # Phase 2 — ingestion pipeline (M3, phase2-selfbuilt.md §4)
+    docai_processor_name: str | None = None  # projects/…/locations/…/processors/…
+    docai_gcs_output_prefix: str | None = None  # gs://bucket/docai-out/ for batch parses
+    embedding_model: str = "gemini-embedding-2"
+    embedding_dim: int = 768  # MRL truncation; pgvector HNSW caps at 2000
+    embedding_batch_size: int = Field(default=250, ge=1, le=250)
+    chunk_size_tokens: int = 800
+    chunk_overlap_tokens: int = 120
+    ingest_cache_dir: str = ".ingest_cache"  # embedding/caption cache (local JSON)
+
     gemini_model: str = "gemini-2.5-flash"
     gemini_fallback_model: str = "gemini-2.5-pro"
     generation_temperature: float = 0.2

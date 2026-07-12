@@ -388,7 +388,14 @@ CREATE INDEX chunks_book_page ON chunks (book_id, page);
 - Input: book PDF from GCS.
 - Output: structured blocks with `{page, bbox, type in [text, table, image], content}`.
 - Fallback: if Document AI fails (rare; e.g. corrupted PDFs, > quota-per-doc pages), fall back to `pymupdf` for text-only extraction with a logged warning.
-- **Chapter detection**: post-process text blocks to detect chapter headings. Heuristic:
+- **Chapter detection**: primary source is the **PDF bookmark outline**
+  (`doc.get_toc()`) — OpenStax 2e ships a complete outline with level-1
+  "Chapter N Title" entries and exact start pages (verified on the real
+  book: 43/43 chapters+appendices detected). The heading heuristics below
+  are the fallback for outline-less PDFs and the Document AI path —
+  **measured reality: the body text never renders "Chapter N: Title" as a
+  heading block**, so regex-over-blocks alone finds 0 chapters on this
+  corpus. Fallback heuristic:
   - Match patterns like `^Chapter \d+`, `^\d+\.\d+ ` (section headings), `^Appendix [A-Z]` — OpenStax 2e is consistently formatted.
   - Fall back to Document AI's heading-level signal (if `layoutType == "heading-1"` for chapters, `heading-2` for sections like `3.1 The Laws of Planetary Motion`).
   - Write a row to `chapters` for each detected chapter heading with inferred `start_page` and compute `end_page` as `next_chapter.start_page - 1`. Sections become rows in `chunks` linked to their parent chapter.

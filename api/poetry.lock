@@ -1093,6 +1093,25 @@ proto-plus = ">=1.22.3,<2.0.0"
 protobuf = ">=3.20.2,<4.21.0 || >4.21.0,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4.21.4 || >4.21.4,<4.21.5 || >4.21.5,<7.0.0"
 
 [[package]]
+name = "google-cloud-documentai"
+version = "3.15.0"
+description = "Google Cloud Documentai API client library"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "google_cloud_documentai-3.15.0-py3-none-any.whl", hash = "sha256:f040f4f9db43411184197a808b11fde52b580723a9fca336f43ea7c6a885bfd8"},
+    {file = "google_cloud_documentai-3.15.0.tar.gz", hash = "sha256:d50b69a8a62aaf803b0d926f93b6579df440f5f779f45fec2c5972768a1cdbbd"},
+]
+
+[package.dependencies]
+google-api-core = {version = ">=2.17.1,<3.0.0", extras = ["grpc"]}
+google-auth = ">=2.14.1,<2.24.0 || >2.24.0,<2.25.0 || >2.25.0,<3.0.0"
+grpcio = ">=1.59.0,<2.0.0"
+proto-plus = ">=1.22.3,<2.0.0"
+protobuf = ">=4.25.8,<8.0.0"
+
+[[package]]
 name = "google-cloud-logging"
 version = "3.15.0"
 description = "Google Cloud Logging API client library"
@@ -2430,6 +2449,26 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+name = "pymupdf"
+version = "1.28.0"
+description = "A high performance Python library for data extraction, analysis, conversion & manipulation of PDF (and other) documents."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "pymupdf-1.28.0-cp310-abi3-macosx_10_15_x86_64.whl", hash = "sha256:892b89ba88e8f98b53133b62877a9dc9b5e7dc6a4aeb837b612db56a8d2e03ac"},
+    {file = "pymupdf-1.28.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:4d692dcf44d3566ae96bc6f6346c6ad432274a29ba617bf7a9fe18009e24adb4"},
+    {file = "pymupdf-1.28.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:47a5c29ed4eb0744de9c4e37bb49b1259b18d4d75fcc8a7c130f7c9fa15956f6"},
+    {file = "pymupdf-1.28.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:44f0973f5e5edbaec95bc34b64e71d1959d4ee90b1328de1b4f4f5b4fa78673f"},
+    {file = "pymupdf-1.28.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:4d61ec323a706e153a12e262e51febfb43eeaa20977785ace135d18d48bcdc83"},
+    {file = "pymupdf-1.28.0-cp310-abi3-win32.whl", hash = "sha256:caea2b3b67347fd79e5d15ed7929b0e886aac594ea228073b6d39de0078189da"},
+    {file = "pymupdf-1.28.0-cp310-abi3-win_amd64.whl", hash = "sha256:e01e90fd86abfeb37ceb921eddb951f988a11d45ff6ce6b7664f2039849068ec"},
+    {file = "pymupdf-1.28.0-cp313-abi3-pyemscripten_2025_0_wasm32.whl", hash = "sha256:74c6d00ba2a9aad3a635db73b07c15db462b480741d831a34a75a56535ebc22b"},
+    {file = "pymupdf-1.28.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:b3e1399c7a64c6914239116a369efcdaac4cfb9e838bde2656d7accc4a85c72d"},
+    {file = "pymupdf-1.28.0.tar.gz", hash = "sha256:e53f3567403a92da15caa9e7ae0164327fff48817e9f40175367fb9de524258d"},
+]
+
+[[package]]
 name = "pytest"
 version = "8.4.2"
 description = "pytest: simple powerful testing with Python"
@@ -3262,4 +3301,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.13"
-content-hash = "f8c6b0613ca278850f18162a16699285f68c1e3b682c1af72c498060ec0b5e57"
+content-hash = "8ab29cc9e3ba79ddd3db8f00bfc372923a1746a5370cbeb740762c8b8bc3226a"
