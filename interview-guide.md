@@ -425,7 +425,7 @@ noise appendix](./learnings/07-vertex-ai-search-setup.md)
 
 ## 8. The Phase 2 design — directly motivated by Phase 1 data
 
-| Phase 1 failure mode (measured) | Phase 2 fix (designed) |
+| Phase 1 failure mode (measured) | Phase 2 fix (built & measured 2026-07-13) |
 |---|---|
 | Document-level retrieval, no chunks | Per-chunk indexing in Cloud SQL `chunks` table |
 | 0% citation accuracy (no page metadata) | Document AI Layout Parser → per-chunk `(page, bbox)` |

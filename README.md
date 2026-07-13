@@ -65,12 +65,20 @@ cd api && poetry run pytest         # API smoke tests
 cd web && npm test                  # (once unit tests are added)
 ```
 
-## Next steps toward Phase 1 on GCP
+## Status (2026-07-13)
 
-See [phase1-managed.md §3.1](./phase1-managed.md) for the `infra/setup.md`
-runbook. Once a Vertex AI Search datastore exists, flip
-`RETRIEVAL_BACKEND=discovery_engine` in the API env and fill in
-`DISCOVERY_ENGINE_*` + `GCP_PROJECT_ID`.
+Both phases are deployed and measured on the same 8-question golden set:
+
+| | Phase 1 (Vertex AI Search) | Phase 2 (Cloud SQL + pgvector) |
+|---|---|---|
+| Keyword score | 18.54% | **86.46%** |
+| Citation accuracy | 0.00% (structural) | **57.50%** |
+
+Run cards in [eval/runs/](./eval/runs/); implementation stories in
+[learnings/11](./learnings/11-phase2-implementation-war-stories.md).
+Backend switch: `RETRIEVAL_BACKEND=mock | discovery_engine | pgvector`.
+Phase 2 infra runbook: [infra/setup-phase2.md](./infra/setup-phase2.md).
+Remaining: M5 tuning (latency), M6 RAGAS + formal A/B report.
 
 ## Stack summary
 
