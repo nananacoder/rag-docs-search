@@ -100,7 +100,7 @@ class IngestionPipeline:
         return chapters, rows
 
     async def _caption_figures(self, drafts: list[ChunkDraft]) -> list[ChunkDraft]:
-        sem = asyncio.Semaphore(8)
+        sem = asyncio.Semaphore(4)  # 8 brushed Vertex RPM quota (429s)
 
         async def one(d: ChunkDraft) -> ChunkDraft:
             if d.modality != "figure" or d.image_bytes is None:
@@ -122,7 +122,7 @@ class IngestionPipeline:
         # Concurrency bounded low and drafts kept in chapter order: in-flight
         # calls mostly share one chapter prefix, keeping Gemini's implicit
         # prompt cache hot (the cost model relies on it).
-        sem = asyncio.Semaphore(8)
+        sem = asyncio.Semaphore(4)  # 8 brushed Vertex RPM quota (429s)
 
         async def one(d: ChunkDraft) -> str | None:
             chapter_text = chapter_texts.get(d.chapter_ordinal or -1, "")

@@ -165,7 +165,7 @@ def test_chapters_from_toc(tmp_path):
     assert chapters[0].title == "Chapter 1 Origins"  # Preface + 1.1 excluded
 
 
-def _hit(i: int) -> "SearchHit":
+def _hit(i: int):
     from app.db.rows import SearchHit
 
     return SearchHit(

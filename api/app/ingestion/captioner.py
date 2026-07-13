@@ -11,6 +11,7 @@ from google.genai import types
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.ingestion.backoff import llm_retry
 from app.ingestion.cache import JsonCache
 
 log = get_logger(__name__)
@@ -37,6 +38,12 @@ class Captioner:
         key = hashlib.sha256(image_bytes).hexdigest()
         if (hit := self._cache.get(key)) is not None:
             return str(hit)
+        text: str = (await self._generate(image_bytes, mime_type)).strip()
+        self._cache.set(key, text)
+        return text
+
+    @llm_retry
+    async def _generate(self, image_bytes: bytes, mime_type: str) -> str:
         response = await self._client.aio.models.generate_content(
             model=self.settings.gemini_model,
             contents=[
@@ -45,6 +52,4 @@ class Captioner:
             ],
             config=types.GenerateContentConfig(temperature=0.0),
         )
-        text: str = (response.text or "").strip()
-        self._cache.set(key, text)
-        return text
+        return response.text or ""

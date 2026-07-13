@@ -13,10 +13,10 @@ import math
 
 from google import genai
 from google.genai import types
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.ingestion.backoff import llm_retry
 from app.ingestion.cache import JsonCache
 
 log = get_logger(__name__)
@@ -25,11 +25,6 @@ log = get_logger(__name__)
 def l2_normalize(vec: list[float]) -> list[float]:
     norm = math.sqrt(sum(x * x for x in vec))
     return vec if norm == 0 else [x / norm for x in vec]
-
-
-def _is_retryable(exc: BaseException) -> bool:
-    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    return code in (429, 503)
 
 
 class Embedder:
@@ -75,11 +70,7 @@ class Embedder:
         )
         return [v for v in out if v is not None]
 
-    @retry(
-        retry=retry_if_exception(_is_retryable),
-        wait=wait_exponential(multiplier=2, max=60),
-        stop=stop_after_attempt(6),
-    )
+    @llm_retry
     async def _embed_batch(
         self, texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT"
     ) -> list[list[float]]:
