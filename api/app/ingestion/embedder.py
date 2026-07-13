@@ -40,9 +40,22 @@ class Embedder:
         )
         self._cache = JsonCache(settings.ingest_cache_dir, "embeddings")
 
-    def _key(self, text: str) -> str:
-        raw = f"{self.settings.embedding_model}:{self.settings.embedding_dim}:{text}"
+    def _key(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> str:
+        raw = (
+            f"{self.settings.embedding_model}:{self.settings.embedding_dim}"
+            f":{task_type}:{text}"
+        )
         return hashlib.sha256(raw.encode()).hexdigest()
+
+    async def embed_query(self, query: str) -> list[float]:
+        """Query-side embedding (RETRIEVAL_QUERY task type), cached (§5.3)."""
+        key = self._key(query, "RETRIEVAL_QUERY")
+        if (hit := self._cache.get(key)) is not None:
+            return [float(x) for x in hit]
+        vecs = await self._embed_batch([query], task_type="RETRIEVAL_QUERY")
+        normalized = l2_normalize(vecs[0])
+        self._cache.set(key, normalized)
+        return normalized
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed contextualized texts; cache hits skip the API entirely."""
@@ -67,13 +80,15 @@ class Embedder:
         wait=wait_exponential(multiplier=2, max=60),
         stop=stop_after_attempt(6),
     )
-    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def _embed_batch(
+        self, texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT"
+    ) -> list[list[float]]:
         response = await self._client.aio.models.embed_content(
             model=self.settings.embedding_model,
             contents=texts,
             config=types.EmbedContentConfig(
                 output_dimensionality=self.settings.embedding_dim,
-                task_type="RETRIEVAL_DOCUMENT",
+                task_type=task_type,
             ),
         )
         assert response.embeddings is not None

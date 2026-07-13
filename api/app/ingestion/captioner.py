@@ -33,14 +33,14 @@ class Captioner:
         )
         self._cache = JsonCache(settings.ingest_cache_dir, "captions")
 
-    async def caption(self, image_bytes: bytes) -> str:
+    async def caption(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
         key = hashlib.sha256(image_bytes).hexdigest()
         if (hit := self._cache.get(key)) is not None:
             return str(hit)
         response = await self._client.aio.models.generate_content(
             model=self.settings.gemini_model,
             contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 _PROMPT,
             ],
             config=types.GenerateContentConfig(temperature=0.0),

@@ -7,11 +7,51 @@ and never sees SQL.
 
 import asyncpg
 
-from app.db.rows import BookRow, ChapterRow, ChunkRow
+from app.db.rows import BookRow, ChapterRow, ChunkRow, SearchHit
 
 _CHUNK_COLUMNS = """
     chunk_id, book_id, chapter_id, page, bbox, modality,
     content, context_prefix, embedding, token_count, created_at
+"""
+
+# Hybrid BM25 + vector + RRF(k=60) — phase2-selfbuilt.md §5.1.
+# $1 query embedding (vector), $2 query text, $3 top_k, $4 book_ids or NULL.
+HYBRID_SEARCH_SQL = """
+WITH vec AS (
+  SELECT chunk_id, 1 - (embedding <=> $1) AS score
+  FROM chunks
+  WHERE ($4::text[] IS NULL OR book_id = ANY($4::text[]))
+  ORDER BY embedding <=> $1
+  LIMIT 40
+),
+bm AS (
+  SELECT chunk_id, ts_rank_cd(content_tsv, plainto_tsquery('english', $2)) AS score
+  FROM chunks
+  WHERE ($4::text[] IS NULL OR book_id = ANY($4::text[]))
+    AND content_tsv @@ plainto_tsquery('english', $2)
+  ORDER BY score DESC
+  LIMIT 40
+),
+fused AS (
+  SELECT chunk_id, SUM(1.0 / (60 + rank)) AS rrf_score
+  FROM (
+    SELECT chunk_id, ROW_NUMBER() OVER (ORDER BY score DESC) AS rank FROM vec
+    UNION ALL
+    SELECT chunk_id, ROW_NUMBER() OVER (ORDER BY score DESC) AS rank FROM bm
+  ) t
+  GROUP BY chunk_id
+)
+SELECT c.chunk_id, c.book_id, c.page, c.bbox, c.modality,
+       c.content, c.context_prefix,
+       b.title AS book_title, b.author,
+       ch.ordinal AS chapter_num, ch.title AS chapter_title,
+       fused.rrf_score
+FROM fused
+JOIN chunks c   USING (chunk_id)
+JOIN books  b   ON b.book_id = c.book_id
+LEFT JOIN chapters ch ON ch.chapter_id = c.chapter_id
+ORDER BY fused.rrf_score DESC
+LIMIT $3
 """
 
 
@@ -127,6 +167,9 @@ class ChunkRepository:
     async def hybrid_search(
         self, query_vec: list[float], query_text: str, top_k: int = 20,
         book_ids: list[str] | None = None,
-    ) -> list[ChunkRow]:
-        """Hybrid BM25 + vector + RRF — phase2-selfbuilt.md §5.1. Lands in M4."""
-        raise NotImplementedError("hybrid_search is an M4 deliverable (see §5.1)")
+    ) -> list[SearchHit]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                HYBRID_SEARCH_SQL, query_vec, query_text, top_k, book_ids
+            )
+            return [SearchHit.model_validate(dict(r)) for r in rows]

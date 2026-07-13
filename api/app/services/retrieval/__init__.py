@@ -16,7 +16,11 @@ def build_retriever(settings: Settings) -> Retriever:
                 )
             return DiscoveryEngineRetriever(settings)
         case "pgvector":
-            raise NotImplementedError("pgvector retriever lands in Phase 2")
+            if not settings.gcp_project_id:
+                raise RuntimeError("pgvector backend requires GCP_PROJECT_ID")
+            from app.services.retrieval.pgvector import PgVectorRetriever
+
+            return PgVectorRetriever(settings)
 
 
 __all__ = ["Retriever", "build_retriever"]

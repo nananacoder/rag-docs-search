@@ -100,34 +100,39 @@ class IngestionPipeline:
         return chapters, rows
 
     async def _caption_figures(self, drafts: list[ChunkDraft]) -> list[ChunkDraft]:
-        kept: list[ChunkDraft] = []
-        for d in drafts:
-            if d.modality == "figure" and d.image_bytes is not None:
-                if self.captioner is None:
-                    continue  # no captioner wired (text-only run): drop figure
-                d = d.model_copy(update={
-                    "content": await self.captioner.caption(d.image_bytes),
-                    "image_bytes": None,
-                })
-            if d.content.strip():
-                kept.append(d)
-        return kept
+        sem = asyncio.Semaphore(8)
+
+        async def one(d: ChunkDraft) -> ChunkDraft:
+            if d.modality != "figure" or d.image_bytes is None:
+                return d
+            if self.captioner is None:
+                return d.model_copy(update={"content": "", "image_bytes": None})
+            async with sem:
+                caption = await self.captioner.caption(d.image_bytes, d.image_mime)
+            return d.model_copy(update={"content": caption, "image_bytes": None})
+
+        captioned = await asyncio.gather(*(one(d) for d in drafts))
+        return [d for d in captioned if d.content.strip()]
 
     async def _contextualize(
         self, drafts: list[ChunkDraft], chapter_texts: dict[int, str]
     ) -> list[str | None]:
         if self.skip_context or self.contextualizer is None:
             return [None] * len(drafts)
-        prefixes: list[str | None] = []
-        for d in drafts:
+        # Concurrency bounded low and drafts kept in chapter order: in-flight
+        # calls mostly share one chapter prefix, keeping Gemini's implicit
+        # prompt cache hot (the cost model relies on it).
+        sem = asyncio.Semaphore(8)
+
+        async def one(d: ChunkDraft) -> str | None:
             chapter_text = chapter_texts.get(d.chapter_ordinal or -1, "")
             if not chapter_text:
-                prefixes.append(None)
-                continue
-            prefixes.append(
-                await self.contextualizer.contextualize(d.content, chapter_text)
-            )
-        return prefixes
+                return None
+            assert self.contextualizer is not None
+            async with sem:
+                return await self.contextualizer.contextualize(d.content, chapter_text)
+
+        return list(await asyncio.gather(*(one(d) for d in drafts)))
 
     async def _embed(
         self, drafts: list[ChunkDraft], prefixes: list[str | None]
@@ -186,7 +191,8 @@ async def _main() -> None:
             toc_chapters = chapters_from_toc(args.pdf, args.book_id) or None
     else:
         assert args.pdf, "--pdf or --gcs-uri required"
-        blocks = PymupdfParser().parse(args.pdf)
+        # Route B+: free pymupdf text AND embedded-image extraction
+        blocks = PymupdfParser().parse(args.pdf, extract_images=not args.dry_run)
         toc_chapters = chapters_from_toc(args.pdf, args.book_id) or None
 
     book = BookRow(

@@ -17,3 +17,4 @@ class Block(BaseModel):
     block_type: BlockType = "text"
     text: str = ""
     image_bytes: bytes | None = None  # figure blocks only
+    image_mime: str = "image/png"

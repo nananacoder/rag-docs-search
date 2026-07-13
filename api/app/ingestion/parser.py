@@ -7,6 +7,7 @@ extraction with a logged warning (rare: corrupted PDFs, quota).
 The pymupdf path doubles as the free local/test parser.
 """
 
+import hashlib
 import re
 from typing import Any, ClassVar
 
@@ -19,6 +20,8 @@ log = get_logger(__name__)
 
 # Body text below this share of page height is usually a running footer.
 _FOOTER_ZONE = 0.94
+# Images smaller than this (w*h px) are icons/decorations, not figures.
+_MIN_FIGURE_PIXELS = 40_000
 
 
 class PymupdfParser:
@@ -30,12 +33,15 @@ class PymupdfParser:
     layout is the primary source of heading signals.
     """
 
-    def parse(self, pdf_path: str) -> list[Block]:
+    def parse(self, pdf_path: str, extract_images: bool = False) -> list[Block]:
         blocks: list[Block] = []
+        seen_images: set[str] = set()
         with fitz.open(pdf_path) as doc:
             for page_no, page in enumerate(doc, start=1):
                 w, h = page.rect.width or 1.0, page.rect.height or 1.0
                 body_size = self._body_font_size(page)
+                if extract_images:
+                    blocks.extend(self._figure_blocks(page, page_no, w, h, seen_images))
                 for b in page.get_text("dict")["blocks"]:
                     if b.get("type") != 0:  # 0 = text block
                         continue
@@ -64,6 +70,39 @@ class PymupdfParser:
                     ))
         log.info("pymupdf_parsed", blocks=len(blocks))
         return blocks
+
+    @staticmethod
+    def _figure_blocks(
+        page: fitz.Page, page_no: int, w: float, h: float, seen: set[str]
+    ) -> list[Block]:
+        """Embedded images as figure blocks — free pymupdf substitute for
+        Document AI's figure detection (route B+). Global sha256 dedupe
+        drops repeated art (logos, chapter-opener decorations)."""
+        out: list[Block] = []
+        for img in page.get_images(full=True):
+            xref = img[0]
+            try:
+                info = page.parent.extract_image(xref)
+            except Exception:
+                continue
+            if info.get("width", 0) * info.get("height", 0) < _MIN_FIGURE_PIXELS:
+                continue
+            data: bytes = info["image"]
+            digest = hashlib.sha256(data).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            bbox = None
+            if rects := page.get_image_rects(xref):
+                r = rects[0]
+                bbox = {"x0": r.x0 / w, "y0": r.y0 / h, "x1": r.x1 / w, "y1": r.y1 / h}
+            ext = info.get("ext", "png")
+            out.append(Block(
+                page=page_no, bbox=bbox, block_type="figure", text="",
+                image_bytes=data,
+                image_mime=f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext}",
+            ))
+        return out
 
     @staticmethod
     def _body_font_size(page: fitz.Page) -> float:

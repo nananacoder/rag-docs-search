@@ -39,6 +39,24 @@ class ChapterRow(DbRow):
     end_page: int | None = None
 
 
+class SearchHit(DbRow):
+    """One hybrid-search result row: chunk + joined book/chapter metadata
+    + RRF score (phase2-selfbuilt.md §5.1)."""
+
+    chunk_id: int
+    book_id: str
+    book_title: str
+    author: str
+    chapter_num: int | None = None
+    chapter_title: str | None = None
+    page: int | None = None
+    bbox: dict[str, Any] | None = None
+    modality: str = "text"
+    content: str
+    context_prefix: str | None = None
+    rrf_score: float
+
+
 class ChunkRow(DbRow):
     chunk_id: int | None = None  # None until inserted (BIGSERIAL)
     book_id: str

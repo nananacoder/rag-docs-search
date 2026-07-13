@@ -165,6 +165,50 @@ def test_chapters_from_toc(tmp_path):
     assert chapters[0].title == "Chapter 1 Origins"  # Preface + 1.1 excluded
 
 
+def _hit(i: int) -> "SearchHit":
+    from app.db.rows import SearchHit
+
+    return SearchHit(
+        chunk_id=i, book_id="b", book_title="T", author="A",
+        page=1, content=f"passage {i}", rrf_score=1.0 / i,
+    )
+
+
+class _FakeRerankClient:
+    def __init__(self, text: str) -> None:
+        outer_text = text
+
+        class _Models:
+            async def generate_content(self, **kwargs):
+                class R:
+                    text = outer_text
+
+                return R()
+
+        class _Aio:
+            models = _Models()
+
+        self.aio = _Aio()
+
+
+async def test_reranker_orders_by_scores():
+    from app.services.retrieval.reranker import GeminiReranker
+
+    settings = Settings()
+    rr = GeminiReranker(settings, client=_FakeRerankClient("[1, 9, 5]"))  # type: ignore[arg-type]
+    out = await rr.rerank("q", [_hit(1), _hit(2), _hit(3)], keep=2)
+    assert [h.chunk_id for h in out] == [2, 3]  # scores 9, 5
+
+
+async def test_reranker_falls_back_to_rrf_on_bad_json():
+    from app.services.retrieval.reranker import GeminiReranker
+
+    settings = Settings()
+    rr = GeminiReranker(settings, client=_FakeRerankClient("not json"))  # type: ignore[arg-type]
+    out = await rr.rerank("q", [_hit(1), _hit(2), _hit(3)], keep=2)
+    assert [h.chunk_id for h in out] == [1, 2]  # RRF order preserved
+
+
 def test_build_chapter_texts_groups_by_ordinal():
     blocks = _blocks()
     chapters = detect_chapters(blocks, "b1")

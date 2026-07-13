@@ -31,6 +31,7 @@ class ChunkDraft(BaseModel):
     modality: Modality = "text"
     chapter_ordinal: int | None = None
     image_bytes: bytes | None = None  # figure chunks, until captioned
+    image_mime: str = "image/png"
 
     @property
     def token_count(self) -> int:
@@ -106,7 +107,7 @@ def chunk_blocks(
                 content=block.text,  # placeholder; captioner fills it
                 page=block.page, bbox=block.bbox,
                 modality="figure", chapter_ordinal=ordinal,
-                image_bytes=block.image_bytes,
+                image_bytes=block.image_bytes, image_mime=block.image_mime,
             ))
             continue
         if block.block_type == "caption":

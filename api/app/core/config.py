@@ -42,7 +42,10 @@ class Settings(BaseSettings):
     # Phase 2 — ingestion pipeline (M3, phase2-selfbuilt.md §4)
     docai_processor_name: str | None = None  # projects/…/locations/…/processors/…
     docai_gcs_output_prefix: str | None = None  # gs://bucket/docai-out/ for batch parses
-    embedding_model: str = "gemini-embedding-2"
+    # gemini-embedding-2(-preview) is allowlist-gated on this project as of
+    # 2026-07 (404/FAILED_PRECONDITION, probed); 001 is the GA Gemini-family
+    # model with the same MRL truncation mechanics. Revisit when 2 hits GA.
+    embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768  # MRL truncation; pgvector HNSW caps at 2000
     embedding_batch_size: int = Field(default=250, ge=1, le=250)
     chunk_size_tokens: int = 800
