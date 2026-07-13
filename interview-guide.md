@@ -30,18 +30,22 @@ differences attribute to the retrieval stack.
 |---|---|---|
 | **Retrieval backend** | Vertex AI Search (Discovery Engine), Standard tier | Cloud SQL + pgvector (HNSW) |
 | **Chunking** | Google-internal, opaque | Hand-written, chapter-aware (`chunk_size=800, overlap=120`) |
-| **Embedding** | Google internal model, opaque | Gemini Embedding 2, 768-dim (MRL truncation), batched + cached |
+| **Embedding** | Google internal model, opaque | gemini-embedding-001, 768-dim (MRL truncation + manual L2 norm), batched + cached — Embedding 2 is allowlist-gated (probed), swap when GA |
 | **Keyword index** | Internal | Postgres `tsvector` + GIN (BM25) |
 | **Retrieval logic** | Single `search` API call | Hybrid: vector + BM25 + RRF fusion + LLM reranker |
 | **Multimodal** | Text-only retrieval (figures not exposed in results) | Document AI Layout Parser → Gemini Vision captions for figures/diagrams |
 | **Citation granularity** | Document-level snippet (no page, no bbox) — entire 1,151-page PDF is 1 document | Per-chunk `(page, bbox)` from Document AI Layout Parser |
 | **Generation** | Gemini 2.5 Flash, same system prompt | Gemini 2.5 Flash, same system prompt — **deliberately unchanged so quality deltas attribute to retrieval, not the model** |
 | **Eval harness** | Same golden set, same metrics, same `run_eval.py` | Same golden set, same metrics, same `run_eval.py` — **frozen so quality deltas are real, not eval-design artifacts** |
-| **Status** | ✅ Deployed, baseline measured | 🟡 Designed, not yet built |
+| **Status** | ✅ Deployed, baseline measured | ✅ **Built & measured (2026-07-13): keyword 86.46%, citation 57.5%** |
 
-**Status as of this writing:** Phase 1 is fully deployed with measured
-baseline numbers. Phase 2 design is locked; implementation is the next
-milestone.
+**Status as of this writing:** both phases are deployed and measured on
+the same golden set. Phase 2 (Cloud SQL + pgvector + hybrid RRF + LLM
+rerank + Contextual Retrieval) scores **86.46% keyword / 57.5% citation**
+vs Phase 1's 18.54% / 0% — see `eval/runs/phase2-pgvector-v1.md` and the
+seven implementation war stories in
+[learnings/11](./learnings/11-phase2-implementation-war-stories.md).
+Remaining: M5 tuning (latency ~19.6s p50), M6 RAGAS + formal A/B report.
 
 ---
 
@@ -210,7 +214,7 @@ GCS bucket
 │ My ingestion pipeline:                   │
 │  ├─ Document AI Layout Parser            │ ← I call it, results visible
 │  ├─ my chunking code (chunk_size=800)    │ ← I write the splitter
-│  ├─ Gemini Embedding 2 API               │ ← I choose the model
+│  ├─ Gemini Embedding (001)               │ ← I choose the model
 │  ├─ Gemini Vision (figure captions)      │ ← I write the prompt
 │  └─ INSERT INTO chunks (Cloud SQL)       │ ← I own the schema
 └────────────────┬─────────────────────────┘

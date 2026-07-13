@@ -418,8 +418,20 @@ Three strategies, selected by block type:
 **Alternative considered:** multimodal embedding model (`multimodalembedding@001`). Rejected because: (a) captions-as-text give one unified BM25 + vector path, (b) captions are human-readable in the UI citation, (c) cheaper at current volumes. **Deliberate trade-off, recorded as an ADR.**
 
 ### 4.4 Embedding
+
+> **As-built (2026-07-13).** Shipped with **`gemini-embedding-001`** —
+> `gemini-embedding-2(-preview)` is allowlist-gated on this project
+> (probed: 404 / FAILED_PRECONDITION). Same MRL truncation mechanics,
+> 768-dim confirmed; truncated outputs measured **non-normalized**
+> (norm 0.587) so the L2-normalize step below is mandatory, not
+> defensive. Also as-built: ingestion ran **route B+** — pymupdf text +
+> pymupdf embedded-image extraction feeding §4.3 captions, deferring
+> Document AI ($10/1,000 pages, no free tier) as an optional precision
+> upgrade. Full story: [learnings/11](./learnings/11-phase2-implementation-war-stories.md).
+
 - Model: **Gemini Embedding 2** (2026 GCP default; adopted over
-  `text-embedding-005` per [learnings/10 audit](./learnings/10-phase2-design-audit-2026.md)).
+  `text-embedding-005` per [learnings/10 audit](./learnings/10-phase2-design-audit-2026.md) —
+  see as-built note above).
 - **Dimension: 768 via `output_dimensionality=768`** (MRL truncation from the
   native 3072; recommended truncation points are 768/1536/3072). Why not
   3072: pgvector's HNSW index caps at **2000 dims** for the `vector` type —
