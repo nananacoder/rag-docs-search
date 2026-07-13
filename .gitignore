@@ -106,3 +106,4 @@ override.tf.json
 # ===== Misc =====
 tmp/
 *.bak
+api/.ingest_cache/
