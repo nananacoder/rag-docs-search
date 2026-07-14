@@ -209,6 +209,22 @@ async def test_reranker_falls_back_to_rrf_on_bad_json():
     assert [h.chunk_id for h in out] == [1, 2]  # RRF order preserved
 
 
+def test_part_for_ordinal_contract():
+    from app.ingestion.parts import ASTRO_PARTS, part_for_ordinal
+
+    assert part_for_ordinal(None) == "openstax-astronomy-2e-pt1"   # front matter
+    assert part_for_ordinal(1) == "openstax-astronomy-2e-pt1"
+    assert part_for_ordinal(6) == "openstax-astronomy-2e-pt1"
+    assert part_for_ordinal(7) == "openstax-astronomy-2e-pt2"
+    assert part_for_ordinal(24) == "openstax-astronomy-2e-pt3"
+    assert part_for_ordinal(30) == "openstax-astronomy-2e-pt4"
+    assert part_for_ordinal(1000) == "openstax-astronomy-2e-pt4"   # appendix A
+    # ids must match the locked golden convention exactly
+    assert [p[0] for p in ASTRO_PARTS] == [
+        f"openstax-astronomy-2e-pt{n}" for n in (1, 2, 3, 4)
+    ]
+
+
 def test_build_chapter_texts_groups_by_ordinal():
     blocks = _blocks()
     chapters = detect_chapters(blocks, "b1")

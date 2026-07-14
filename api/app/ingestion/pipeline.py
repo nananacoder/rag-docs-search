@@ -27,6 +27,7 @@ from app.ingestion.chunker import ChunkDraft, chunk_blocks
 from app.ingestion.contextualizer import Contextualizer
 from app.ingestion.embedder import Embedder
 from app.ingestion.parser import DocumentAIParser, PymupdfParser
+from app.ingestion.parts import part_books, part_for_ordinal
 
 log = get_logger(__name__)
 
@@ -147,10 +148,12 @@ class IngestionPipeline:
         return list(await self.embedder.embed(texts))
 
     async def upsert(
-        self, book: BookRow, chapters: list[ChapterRow], rows: list[ChunkRow]
+        self, books: list[BookRow], chapters: list[ChapterRow], rows: list[ChunkRow]
     ) -> int:
         pool = await connection.get_pool()
-        await BookRepository(pool).insert(book)
+        book_repo = BookRepository(pool)
+        for book in books:
+            await book_repo.insert(book)
         chapter_repo = ChapterRepository(pool)
         id_by_ordinal = {
             ch.ordinal: await chapter_repo.insert(ch) for ch in chapters
@@ -158,10 +161,13 @@ class IngestionPipeline:
         for row, ordinal in zip(rows, self._ordinals, strict=True):
             row.chapter_id = id_by_ordinal.get(ordinal) if ordinal is not None else None
         chunk_repo = ChunkRepository(pool)
+        book_ids = [b.book_id for b in books]
         async with pool.acquire() as conn, conn.transaction():
-            await conn.execute("DELETE FROM chunks WHERE book_id = $1", book.book_id)
+            await conn.execute(
+                "DELETE FROM chunks WHERE book_id = ANY($1::text[])", book_ids
+            )
             inserted = await chunk_repo.insert_many(rows, conn)
-        log.info("book_ingested", book_id=book.book_id, chunks=inserted)
+        log.info("books_ingested", book_ids=book_ids, chunks=inserted)
         return inserted
 
 
@@ -173,6 +179,10 @@ async def _main() -> None:
     ap.add_argument("--title", required=True)
     ap.add_argument("--author", required=True)
     ap.add_argument("--year", type=int, default=None)
+    ap.add_argument("--split-astro-parts", action="store_true",
+                    help="write to the 4 canonical openstax-astronomy-2e-pt{N} "
+                         "book_ids per the golden-set contract (ignores --book-id "
+                         "at upsert time)")
     ap.add_argument("--dry-run", action="store_true",
                     help="parse+chunk only: no LLM calls, no DB writes, print stats")
     ap.add_argument("--no-context", action="store_true",
@@ -222,7 +232,15 @@ async def _main() -> None:
         skip_context=args.no_context,
     )
     chapters, rows = await pipe.build_chunks(blocks, book, chapters=toc_chapters)
-    inserted = await pipe.upsert(book, chapters, rows)
+    if args.split_astro_parts:
+        books = part_books(book.gcs_uri, args.year)
+        for ch in chapters:
+            ch.book_id = part_for_ordinal(ch.ordinal)
+        for row, ordinal in zip(rows, pipe._ordinals, strict=True):
+            row.book_id = part_for_ordinal(ordinal)
+    else:
+        books = [book]
+    inserted = await pipe.upsert(books, chapters, rows)
     print(f"ingested {inserted} chunks for {book.book_id}")
     await connection.close_pool()
 

@@ -1,4 +1,3 @@
-import json
 import time
 from collections.abc import AsyncIterator
 
@@ -64,7 +63,7 @@ async def _stream_query(
             top_k=top_k,
             book_ids=request.book_ids,
         )
-    except Exception as exc:  # noqa: BLE001 — surface any retriever error to UI
+    except Exception as exc:
         log.exception("retrieval_failed", error=str(exc))
         yield _sse(ErrorEvent(message=f"Retrieval failed: {exc}"))
         return
@@ -76,7 +75,7 @@ async def _stream_query(
         async for token in generator.stream(request.question, chunks):
             if token:
                 yield _sse(TokenEvent(text=token))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.exception("generation_failed", error=str(exc))
         yield _sse(ErrorEvent(message=f"Generation failed: {exc}"))
         return
