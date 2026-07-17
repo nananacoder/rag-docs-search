@@ -489,6 +489,28 @@ A real signal of project judgment is what's missing on purpose. Examples:
 
 ---
 
+## 9.5 The cost-engineering story — the whole experiment for ~$12
+
+Cost was treated as a first-class engineering metric, same as recall and
+latency. Total spend for BOTH phases — deploy, ingest, measure, A/B —
+is **~$12 USD**, inside a ¥2000/month (~$13) budget alert.
+
+| Mechanism | What it does | Money effect |
+|---|---|---|
+| Scale-to-zero everywhere | No always-on serving: LLM rerank instead of a cross-encoder endpoint; Cloud Run designed at min-instances=0 | idle ≈ $0 |
+| Session-based Cloud SQL | `sql-start.sh` / `sql-stop.sh` around dev sessions (`activation-policy`) | ~2.5h total runtime billed ≈ $0.03; stopped = storage-only ~$1.5/mo |
+| Cache every paid stage | captions / context prefixes / embeddings keyed by content+model hash | re-ingest and failure recovery cost ~$0 (proven when a 429 killed a run mid-way — the cached $1.5 of captions survived) |
+| Measured substitution | Document AI ($11.5, priced per page, no free tier) replaced by pymupdf + Gemini Vision captions (~$1) after quantifying what the $11.5 uniquely buys (bbox precision — a UI concern, not a retrieval-metric concern) | −$10.5 with zero metric loss |
+| Free verification first | docker pgvector for schema/round-trip; dry-run parse before any API call; $0.0001 API probes before 3,000-call batches | bugs caught at $0 instead of mid-paid-run |
+| Budget alert as guardrail | ¥2000/month alert (not a cap) — fired at 90% exactly as the month's plan predicted | spend is *predicted*, not discovered |
+
+> **In interviews:** *"The entire two-architecture experiment cost about
+> twelve dollars, and none of it was luck: every paid stage is cached and
+> idempotent, every service scales to zero, and the one big-ticket item —
+> Document AI at $11.5 — I replaced with a $1 substitute after measuring
+> that what it uniquely buys doesn't move my retrieval metrics. Cost is
+> an engineering metric; you design for it like you design for recall."*
+
 ## 10. The biggest engineering moments — and where to find them
 
 These are the project's "show me a hard thing you debugged" stories. Each
