@@ -64,7 +64,9 @@ _FIXTURE_CHUNKS: list[RetrievedChunk] = [
             "a somewhat flattened circle, or ellipse."
         ),
         score=0.93,
-        bbox=BoundingBox(x0=110, y0=220, x1=500, y1=380),
+        # Normalized 0-1, top-left origin — matches the Phase 2 pipeline
+        # convention (pymupdf/Document AI) that the Angular overlay expects.
+        bbox=BoundingBox(x0=0.18, y0=0.34, x1=0.82, y1=0.46),
     ),
     RetrievedChunk(
         chunk_id="astronomy-2e-ch15-p522",
