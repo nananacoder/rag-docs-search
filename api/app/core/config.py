@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     db_pool_max_size: int = Field(default=10, ge=1)
 
     # Phase 2 — ingestion pipeline (M3, phase2-selfbuilt.md §4)
+    # Corpus PDF in GCS, streamed to the browser via /api/pdf/{name} (the
+    # source pane's bbox overlay) — same-origin proxy avoids GCS CORS.
+    pdf_gcs_uri: str = "gs://my-rag-docs-bucket-123/astronomy-2e.pdf"
     docai_processor_name: str | None = None  # projects/…/locations/…/processors/…
     docai_gcs_output_prefix: str | None = None  # gs://bucket/docai-out/ for batch parses
     # gemini-embedding-2(-preview) is allowlist-gated on this project as of
