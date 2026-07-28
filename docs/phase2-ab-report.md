@@ -6,9 +6,15 @@ same harness. **Only the retrieval architecture changes.** Every score
 delta below is therefore attributable to retrieval, not to the model, the
 prompt, or the eval design.
 
-> **Status**: keyword / citation / latency measured (both phases).
-> RAGAS faithfulness / answer_relevancy / context_precision: harness wired
-> (`run_eval.py --ragas`), paid run pending — placeholders marked `‹RAGAS›`.
+> **Status**: keyword / citation / latency measured (both phases). RAGAS
+> harness wired (`run_eval.py --ragas`) and the direct-Gemini judge
+> **validated against real Gemini** (faithfulness correctly scored 0.667 on
+> a crafted 1-of-3-unsupported-claims sample). The full 8-question paid run
+> did NOT complete: on teardown day, outbound port 3307 to Cloud SQL was
+> network-blocked (learnings/11 §9), and the instance was deleted to stop
+> the daily storage cost. RAGAS cells stay `‹RAGAS›` — the DB is
+> regenerable from ingestion caches if the run is ever finished. The
+> retrieval A/B stands on the measured keyword/citation deltas below.
 
 ---
 

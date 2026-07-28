@@ -86,6 +86,47 @@ LLM cost. Citation went 0% → 57.5% without touching retrieval.
 > The producer (ingestion) must conform to it — and a metric that can
 > say *book_match=False* pinpoints contract violations instantly.
 
+## 8. RAGAS: a four-way dependency deadlock, solved by dropping the framework
+
+Wiring RAGAS (the planned LLM-judged quality layer) hit a hard wall on
+Python 3.12: every `ragas` version imports its judge through
+`langchain_community.chat_models.vertexai`, a shim **removed** from current
+langchain-community. Pinning back to the langchain 0.2 generation (which
+still has the shim) then forces pydantic-v1 compat, which **crashes on
+`langchain-google-vertexai`'s PEP-695 `TypeAliasType`**
+(`RuntimeError: error checking inheritance of SafetySettingsType`). ragas ×
+langchain × vertex × pydantic are mutually unsatisfiable without freezing
+the whole stack to 2024 versions.
+
+**Fix**: stop fighting the framework. The three metric *definitions*
+(faithfulness, answer relevancy, context precision) are simple; I
+reimplemented them as direct Gemini judge calls using the project's
+already-working `google-genai` client — no langchain, no version pins.
+Validated against a crafted sample (an answer with one deliberately
+unsupported claim): **faithfulness scored 0.667**, correctly catching 1 of
+3 claims as ungrounded; relevancy 0.9; precision 1.0.
+
+> **Lesson**: same call as the no-ORM and no-LangChain-pg decisions —
+> when a heavy framework fights the platform harder than the problem does,
+> drop to the primitive. The metric is the deliverable, not the library.
+
+## 9. The teardown-day network block
+
+The full 8-question paid RAGAS run never completed: on teardown day, from a
+different network, **outbound port 3307 (the Cloud SQL connector port) was
+firewall-blocked** — every `retrieve()` timed out, though the same machine
+connected fine two weeks earlier. Not fixable from the app side. Combined
+with a cost-driven decision to tear down (the stopped instance still billed
+~¥8/day storage), the call was: validate the judge against real Gemini
+(done, §8), delete the instance, and let the already-measured
+keyword/citation deltas carry the A/B. The DB is regenerable from the local
+ingestion caches + `--split-astro-parts` if the run is ever finished.
+
+> **Lesson**: managed-DB access depends on the *client* network, not just
+> the instance. Cloud SQL's 3307 is a common corporate/ISP block — a proxy
+> or private-IP path would dodge it. Also: cost pressure is a legitimate
+> input to an engineering stop decision.
+
 ## Route B+ postscript: the $11.5 that wasn't spent
 
 Document AI Layout Parser prices at $10/1,000 pages with no free tier —
