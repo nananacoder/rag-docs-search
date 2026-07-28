@@ -32,6 +32,7 @@ def _chunks_to_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
             page=c.page,
             snippet=_make_snippet(c.content),
             bbox=c.bbox,
+            content=c.content,
         )
         for i, c in enumerate(chunks)
     ]

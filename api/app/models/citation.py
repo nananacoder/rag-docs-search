@@ -22,6 +22,10 @@ class Citation(ApiModel):
     page: int = Field(..., ge=1)
     snippet: str
     bbox: BoundingBox | None = None
+    # Full verbatim chunk text. The UI shows `snippet`; this feeds accurate
+    # retrieved-contexts to offline RAGAS (truncated snippets understate
+    # faithfulness). Optional so mock/other producers can omit it.
+    content: str | None = None
 
 
 class RetrievedChunk(ApiModel):

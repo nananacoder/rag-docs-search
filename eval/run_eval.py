@@ -29,7 +29,8 @@ import httpx
 
 # Allow running as a script from project root: python eval/run_eval.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from metrics import CitationResult, KeywordResult, citation_accuracy, keyword_score  # noqa: E402
+from metrics import CitationResult, KeywordResult, citation_accuracy, keyword_score
+from ragas_eval import RagasScores
 
 
 @dataclass
@@ -59,6 +60,7 @@ class ScoredEntry:
     result: QueryResult
     keyword: KeywordResult
     citation: CitationResult
+    ragas: RagasScores | None = None
 
 
 def load_golden(path: Path) -> list[GoldenEntry]:
@@ -90,29 +92,31 @@ def call_api(api_base: str, question: str, book_ids: list[str] | None = None) ->
     error = None
 
     try:
-        with httpx.Client(timeout=120.0) as client:
-            with client.stream("POST", url, json=payload) as r:
-                r.raise_for_status()
-                for raw_line in r.iter_lines():
-                    if not raw_line or not raw_line.startswith("data:"):
-                        continue
-                    data_str = raw_line[len("data:"):].strip()
-                    if not data_str:
-                        continue
-                    try:
-                        evt = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    etype = evt.get("type")
-                    if etype == "citations":
-                        citations = evt.get("citations", [])
-                    elif etype == "token":
-                        tokens.append(evt.get("text", ""))
-                    elif etype == "done":
-                        total_ms = evt.get("totalMs") or evt.get("total_ms")
-                        model = evt.get("model")
-                    elif etype == "error":
-                        error = evt.get("message")
+        with (
+            httpx.Client(timeout=120.0) as client,
+            client.stream("POST", url, json=payload) as r,
+        ):
+            r.raise_for_status()
+            for raw_line in r.iter_lines():
+                if not raw_line or not raw_line.startswith("data:"):
+                    continue
+                data_str = raw_line[len("data:"):].strip()
+                if not data_str:
+                    continue
+                try:
+                    evt = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                etype = evt.get("type")
+                if etype == "citations":
+                    citations = evt.get("citations", [])
+                elif etype == "token":
+                    tokens.append(evt.get("text", ""))
+                elif etype == "done":
+                    total_ms = evt.get("totalMs") or evt.get("total_ms")
+                    model = evt.get("model")
+                elif etype == "error":
+                    error = evt.get("message")
     except httpx.HTTPError as exc:
         error = f"HTTP error: {exc}"
 
@@ -166,12 +170,29 @@ def render_markdown(scored: list[ScoredEntry], api_base: str, golden_path: Path)
     lines.append("")
     lines.append("## Overall")
     lines.append("")
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|---|---|")
+    lines.append("| Metric | Value |")
+    lines.append("|---|---|")
     lines.append(f"| Avg keyword score | **{avg_kw:.2%}** |")
     lines.append(f"| Avg citation accuracy | **{avg_cite:.2%}** |")
     if avg_latency is not None:
         lines.append(f"| Avg latency (ms) | {avg_latency:.0f} |")
+
+    def _avg_ragas(attr: str) -> float | None:
+        vals = [
+            getattr(s.ragas, attr)
+            for s in scored
+            if s.ragas is not None and getattr(s.ragas, attr) is not None
+        ]
+        return statistics.mean(vals) if vals else None
+
+    if any(s.ragas is not None for s in scored):
+        for label, attr in [
+            ("Faithfulness (RAGAS)", "faithfulness"),
+            ("Answer relevancy (RAGAS)", "answer_relevancy"),
+            ("Context precision (RAGAS)", "context_precision"),
+        ]:
+            v = _avg_ragas(attr)
+            lines.append(f"| {label} | {f'**{v:.2f}**' if v is not None else '—'} |")
     lines.append("")
 
     lines.append("## Per-bucket")
@@ -206,6 +227,19 @@ def render_markdown(scored: list[ScoredEntry], api_base: str, golden_path: Path)
                      f"book_match={s.citation.book_match})")
         if s.result.total_ms is not None:
             lines.append(f"- Latency: {s.result.total_ms} ms")
+        if s.ragas is not None:
+            r = s.ragas
+            parts = [
+                f"{name}={val:.2f}"
+                for name, val in [
+                    ("faithfulness", r.faithfulness),
+                    ("answer_relevancy", r.answer_relevancy),
+                    ("context_precision", r.context_precision),
+                ]
+                if val is not None
+            ]
+            if parts:
+                lines.append(f"- RAGAS: {', '.join(parts)}")
         ans = s.result.answer.strip().replace("\n", " ")
         if len(ans) > 400:
             ans = ans[:397] + "…"
@@ -224,6 +258,10 @@ def main() -> int:
     p.add_argument("--scope-books", action="store_true",
                    help="Pass each golden entry's expected_books as the bookIds filter "
                         "(simulates UI-scoped queries instead of unscoped).")
+    p.add_argument("--ragas", action="store_true",
+                   help="Also compute RAGAS faithfulness/answer_relevancy/context_"
+                        "precision (LLM-judged, paid). Needs: pip install ragas "
+                        "langchain-google-vertexai; and GCP ADC.")
     args = p.parse_args()
 
     if not args.golden.exists():
@@ -246,8 +284,27 @@ def main() -> int:
         if result.error:
             print(f"  ⚠️  {result.error}")
         else:
-            print(f"  done in {dt_ms} ms — kw matches: {len(entry.expected_answer_keywords)} expected")
+            print(f"  done in {dt_ms} ms — {len(entry.expected_answer_keywords)} expected keywords")
         scored.append(score_entry(entry, result))
+
+    if args.ragas:
+        print("\nScoring with RAGAS (LLM judge = Gemini)…")
+        from ragas_eval import score_with_ragas
+        rows = [
+            {
+                "question": s.entry.question,
+                "answer": s.result.answer,
+                # full chunk text when the API provides it; snippet otherwise
+                "contexts": [
+                    c.get("content") or c.get("snippet") or ""
+                    for c in s.result.citations
+                ],
+            }
+            for s in scored
+        ]
+        ragas_scores = score_with_ragas(rows)
+        for s, rs in zip(scored, ragas_scores, strict=True):
+            s.ragas = rs
 
     if args.out is None:
         ts = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
